@@ -1,0 +1,39 @@
+#code
+cnt=0
+
+if RECORD:
+    
+    record_audio()
+    
+    
+ipd.Audio(FILE_NAME)
+
+
+
+a = np.average(np.array(read(FILE_NAME)[1],dtype=float), axis=1)
+
+
+nearest = display_graph(a)
+
+
+
+try:
+    
+    import os
+    import sys
+    sys.path.append(os.path.abspath(os.path.expanduser(r'~/Application/marimba-excel-driver')))
+    import misc
+
+    
+    wb, sheets = misc.get_spreadsheet_with(['fft_output'])
+
+    used = sheets.fft_output.UsedRange
+    next_row = used.Row + used.Rows.Count
+        
+    
+    sheets.fft_output.Range('C%d:E%d'%(next_row,next_row)).Value = [[float(j) for i,j in nearest]]
+    
+    
+except Exception as e:
+    print('Oops, error written to Excel')
+    print(e)

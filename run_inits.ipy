@@ -1,0 +1,150 @@
+%matplotlib notebook
+
+from IPython.core.display import display, HTML
+display(HTML("<style>.container { width:100% !important; }</style>"))
+import pylab as plt
+import pyaudio
+import wave
+from scipy.io.wavfile import read
+from array import array
+import numpy as np
+import IPython.display as ipd
+import time
+from scipy import interpolate
+from scipy import ndimage
+from skimage.feature import peak_local_max
+import slice_maker
+
+FORMAT=pyaudio.paInt16
+CHANNELS=2
+RATE=44100
+CHUNK=1024
+FILE_NAME="RECORDING.wav"
+
+def record_audio():
+    cnt=0
+    
+
+    audio=pyaudio.PyAudio() #instantiate the pyaudio
+
+    
+    #recording prerequisites
+    stream=audio.open(format=FORMAT,channels=CHANNELS, 
+                      rate=RATE,
+                      input=True,
+                      frames_per_buffer=CHUNK)
+
+    
+    #starting recording
+    frames=[]
+    
+    time.sleep(WAIT)
+    print('Start.', end=' ', flush=True)
+    
+    for i in range(0,int(RATE/CHUNK*DURATION)):
+        
+        try:
+            data=stream.read(CHUNK)
+            frames.append(data)
+        except (KeyboardInterrupt, SystemExit):
+            break
+    print('End.', end=' ')
+    
+    #end of recording
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
+    #writing to file
+    print('Opening file '+FILE_NAME+'.')
+    wavfile=wave.open(FILE_NAME,'wb')
+    wavfile.setnchannels(CHANNELS)
+    wavfile.setsampwidth(audio.get_sample_size(FORMAT))
+    wavfile.setframerate(RATE)
+    wavfile.writeframes(b''.join(frames))#append frames recorded to file
+    print('Writing to '+FILE_NAME+'.')
+    wavfile.close()
+    print('Finished writing to '+FILE_NAME+'.')
+    
+tmp = {}
+def display_graph(a):
+    tot_len = 2**(np.ceil(np.log2(len(a)))+RESOLUTION).astype('int')
+
+    a_zp = np.r_[a*np.hamming(len(a)), [0]*(len(a)-tot_len)]
+
+    fft_abs = np.abs(np.fft.fft(a_zp))
+    x = np.fft.fftfreq(len(fft_abs), d=1/RATE)
+
+    fft_abs, x = fft_abs[x>0], x[x>0]
+    fft_abs = fft_abs/np.max(fft_abs)
+    
+    if DO_TRANSFORM:
+        x_log = np.linspace(np.log2(x[0]), np.log2(x[-1]), len(x))
+        x_frq = 2**x_log
+        f = interpolate.interp1d(x, fft_abs, kind='cubic', bounds_error=False, fill_value='extrapolate')
+        y = f(x_frq)
+    else:
+        x_frq = x
+        y = fft_abs
+    
+    
+    y_prev = np.array(y)
+    y = np.zeros_like(y)
+    for (i,j), p  in slice_maker.slice_maker(len(x_frq), nwindows=40, overlap_frac=0.2):
+        suby = ndimage.filters.gaussian_filter1d(y_prev[i:j], sigma=blur_level((x_frq[i]+x_frq[j-1])/2))
+        y[i:j] += suby*p.dampwin
+    
+    
+    coordinates = peak_local_max(y, min_distance=700).flatten()
+    coordinates = np.sort(coordinates)
+    mask = y[coordinates] > CUTTOFF_THRESHOLD
+    coordinates = coordinates[mask]
+    
+    
+    coordinates=coordinates[x_frq[coordinates]>X0]
+    coordinates=coordinates[x_frq[coordinates]<X1]
+    coordinates = coordinates[np.argmax(y[coordinates]):]
+    
+    peaks = x_frq[coordinates]
+    rats = peaks/peaks[0]
+    
+    peaks = np.round(peaks, decimals=1)
+    rats = np.round(rats, decimals=3)
+
+
+    print('Left to right: ', end='')
+    for i,j in zip(peaks, rats):
+        print("("+str(j)+") "+str(i), end = '|  ')
+    print()
+
+
+    nearest = []
+    for ratio in [1, 4, 10.079]:
+        nearest.append([np.inf, 0])
+        for i,j in zip(peaks, rats):
+            if np.abs(ratio - nearest[-1][0]) > np.abs(ratio - j):
+                nearest[-1][0] = j
+                nearest[-1][1] = i
+              
+
+    for r, f in nearest:
+        print("%.3f:   %.1f"%(r, f))
+                      
+
+    plt.figure(figsize=[11,3])
+
+    plot_func = plt.semilogx if LOGARITHMIC_F else plt.plot
+    plot_func(x_frq, y)
+    plot_func(x_frq[coordinates], y[coordinates],'o')
+    plt.xlim([X0, X1])
+    plt.tight_layout()
+    
+        
+                
+    for r, f in nearest:
+        plt.text(f, 1  , "%.2f"%r)
+        plt.text(f, 1/2, "%.2f"%f)
+            
+    
+    if LOGARITHMIC_Y: plt.semilogy()
+    
+    return nearest
